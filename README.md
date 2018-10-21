@@ -5,6 +5,7 @@ NFL Forecast
 
 This script generates NFL predictions using the margin-dependent Elo model (melo). It calculates offensive and defensive ratings, as well as point spread and point totals.
 
+![NFL point spreads](example.png)
 
 Usage
 -----
