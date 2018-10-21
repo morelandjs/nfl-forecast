@@ -1,5 +1,5 @@
 NFL Forecast
-############
+============
 
 *Predict NFL point spreads and point totals*
 
