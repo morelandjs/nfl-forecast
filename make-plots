@@ -1,0 +1,276 @@
+#!/usr/bin/env python2
+
+import argparse
+from datetime import datetime
+
+import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
+import matplotlib.patches as patches
+import numpy as np
+
+from melo_nfl import nfl_spreads, nfl_totals
+import nfldb
+
+
+# figure style
+plt.style.use('fivethirtyeight')
+
+# figure size
+aspect = 1/1.618
+resolution = 72.27
+columnwidth = 180/resolution
+textwidth = 373/resolution
+textheight = 672/resolution
+textiny, texsmall, texnormal = 7.9, 9.25, 10.0
+offblack = '#333333'
+blue = '#1b6394'
+orange = '#F1A107'
+
+plt.rcParams.update({
+    'font.size': texsmall,
+    'legend.fontsize': texsmall,
+    'axes.labelsize': texsmall,
+    'axes.titlesize': texsmall,
+    'xtick.labelsize': textiny,
+    'ytick.labelsize': textiny,
+    'font.weight': 400,
+    'axes.labelweight': 400,
+    'axes.titleweight': 400,
+    'lines.linewidth': .9,
+    'lines.markersize': 3,
+    'lines.markeredgewidth': .1,
+    'patch.linewidth': .9,
+    'axes.linewidth': .5,
+    'xtick.major.width': .5,
+    'ytick.major.width': .5,
+    'xtick.minor.width': .5,
+    'ytick.minor.width': .5,
+    'xtick.major.size': 2,
+    'ytick.major.size': 2,
+    'xtick.minor.size': 1.3,
+    'ytick.minor.size': 1.3,
+    'xtick.major.pad': 1.8,
+    'ytick.major.pad': 1.8,
+    'text.color': offblack,
+    'axes.labelcolor': offblack,
+    'xtick.color': offblack,
+    'ytick.color': offblack,
+    'legend.numpoints': 1,
+    'legend.scatterpoints': 1,
+    'legend.frameon': False,
+    'image.interpolation': 'none',
+    'pdf.fonttype': 3,
+})
+
+
+plot_functions = {}
+
+
+def plot(f):
+    def wrapper(*args, **kwargs):
+        print(f.__name__)
+        f(*args, **kwargs)
+        plt.savefig('{}.png'.format(f.__name__), dpi=150)
+        plt.close()
+
+    plot_functions[f.__name__] = wrapper
+
+    return wrapper
+
+
+def finish(despine=True, remove_ticks=False, pad=0.1,
+           h_pad=None, w_pad=None, rect=[0, 0, 1, 1]):
+    fig = plt.gcf()
+
+    for ax in fig.axes:
+        if despine:
+            for spine in 'top', 'right':
+                ax.spines[spine].set_visible(False)
+
+        if remove_ticks:
+            for ax_name in 'xaxis', 'yaxis':
+                getattr(ax, ax_name).set_ticks_position('none')
+        else:
+            ax.xaxis.set_ticks_position('bottom')
+            ax.yaxis.set_ticks_position('left')
+
+    fig.tight_layout(pad=pad, h_pad=h_pad, w_pad=w_pad, rect=rect)
+
+
+@plot
+def ratings(time):
+    """
+    Offensive and defensive power ratings for each team
+
+    """
+    plt.figure(figsize=(3.8, 4))
+    ax = plt.axes()
+
+    spreads, totals = [{
+        team: melo.mean(time, team, 'avg', neutral=True)
+        for team in melo.labels
+    } for melo in (nfl_spreads, nfl_totals)]
+
+    smin, smax = [f(spreads.values()) for f in (min, max)]
+
+    for team, spread in spreads.items():
+
+        total = totals[team]
+
+        offense = .5*(total + spread)
+        defense = .5*(total - spread)
+
+        color = plt.cm.coolwarm((spread - smin) / (smax - smin))
+        bump = .05
+
+        plt.scatter(defense, offense, s=15, c=color,
+                    edgecolor=offblack, linewidth=.4)
+
+        plt.annotate(team, xy=(defense - bump, offense + bump),
+                     xycoords='data', ha='left')
+
+    for axis in ax.xaxis, ax.yaxis:
+        loc = ticker.MultipleLocator(base=1)
+        axis.set_major_locator(loc)
+
+    ax.grid(True, which='both')
+    ax.set_aspect('equal', 'datalim')
+    ax.invert_xaxis()
+
+    plt.xlabel('Points Allowed')
+    plt.ylabel('Points Scored')
+    plt.title('As of {}'.format(time))
+
+    finish(pad=.5)
+
+
+def points(model, year=2017, week=1):
+    """
+    This function predicts the point total and point spread
+    for a specified year and week using the margin-dependent
+    Elo model.
+
+    """
+    plt.figure(figsize=(columnwidth, columnwidth/aspect))
+    ax = plt.gca()
+
+    q = nfldb.Query(nfldb.connect())
+    q.game(season_type='Regular', season_year=year, week=week)
+
+    xlim, xticks, xlabel = {
+        'Fermi': [
+            (-37, 37), np.linspace(-30, 30, 7),
+            r'$\mathrm{home} - \mathrm{away}$ [points]'
+        ],
+        'Bose': [
+            (5, 85), np.linspace(15, 75, 5),
+            r'$\mathrm{home} + \mathrm{away}$ [points]'
+        ]
+    }[model.mode]
+
+    xmin, xmax = xlim
+
+    # loop over games in the week
+    for shift, game in enumerate(q.as_games(), start=1):
+        time = game.start_time.replace(tzinfo=None)
+        home = game.home_team
+        away = game.away_team
+
+        line_lo, box_lo, median, box_hi, line_hi = model.percentile(
+            time, home, away, q=[5, 25, 50, 75, 95], smooth=3
+        )
+
+        mean = model.mean(time, home, away)
+        int_mean = int(round(mean))
+
+        box = patches.Rectangle(
+                (box_lo, shift-.15), box_hi - box_lo, 0.3,
+                color=blue, alpha=.8, lw=0
+                )
+
+        ax.add_patch(box)
+
+        plt.plot((line_lo, box_lo), (shift, shift),
+                 color=blue, alpha=.8, lw=1.2)
+
+        plt.plot((box_hi, line_hi), (shift, shift),
+                 color=blue, alpha=.8, lw=1.2)
+
+        plt.plot((median, median), (shift-.15, shift+.15),
+                 color=orange, lw=1.2)
+
+        plt.scatter(mean, shift, color=orange, zorder=4)
+
+        for team, xloc in (home, xmax), (away, xmin):
+            plt.annotate(team, xy=(xloc, shift), clip_on=False,
+                         xycoords='data', ha='center', va='center')
+
+        plt.annotate(int_mean, xy=(mean, shift+.4), clip_on=False,
+                     xycoords='data', ha='center', va='center', fontsize=9)
+
+    for team, xfrac in ('AWAY', 0), ('HOME', 1):
+        plt.annotate(team, xy=(xfrac, 1.02), xycoords='axes fraction',
+                     clip_on=False, ha='center', va='center', color='.7')
+
+    plt.xlim(xmin, xmax)
+    plt.xticks(xticks)
+    plt.xlabel(xlabel)
+
+    plt.ylim(.5, shift + .5)
+    plt.yticks([])
+
+    finish(rect=(0.07, 0, 0.93, 0.97))
+
+
+@plot
+def spreads(year, week):
+    """
+    Plot NFL spread predictions
+
+    """
+    points(nfl_spreads, year, week)
+
+
+@plot
+def totals(year, week):
+    """
+    Plot NFL total predictions
+
+    """
+    points(nfl_totals, year, week)
+
+
+def main():
+    """
+    Calculates the point spread and point total distributions for
+    the specified season year and week.
+
+    """
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+            "year",
+            action="store",
+            type=int,
+            help="NFL season year (2009-present)"
+            )
+    parser.add_argument(
+            "week",
+            action="store",
+            type=int,
+            help="NFL week (1-17)"
+            )
+
+    args = parser.parse_args()
+    args_dict = vars(args)
+
+    # plot offensive and defensive ratings
+    time = datetime.today()
+    ratings(time)
+
+    # plot the point spread and point total
+    for plot in spreads, totals:
+        plot(**args_dict)
+
+
+if __name__ == "__main__":
+    main()
