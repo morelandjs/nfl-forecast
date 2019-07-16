@@ -1,0 +1,10 @@
+#!/usr/bin/bash
+
+YEAR=$1
+WEEK=$2
+
+./make-plots $YEAR $WEEK
+
+for f in spreads totals ratings; do
+  mv $f.png ../nflmargins/nflmargins/static/img/$f/$YEAR/week-$WEEK.png
+done

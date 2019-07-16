@@ -1,7 +1,7 @@
 #!/usr/bin/env python2
 
 import argparse
-from datetime import datetime
+from datetime import timedelta
 
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
@@ -98,7 +98,7 @@ def finish(despine=True, remove_ticks=False, pad=0.1,
 
 
 @plot
-def ratings(time):
+def ratings(year=2017, week=1):
     """
     Offensive and defensive power ratings for each team
 
@@ -106,8 +106,13 @@ def ratings(time):
     plt.figure(figsize=(3.8, 4))
     ax = plt.axes()
 
+    q = nfldb.Query(nfldb.connect())
+    q.game(season_type='Regular', season_year=year, week=week)
+    time = min([g.start_time.replace(tzinfo=None) for g in q.as_games()])
+    time += timedelta(days=1)
+
     spreads, totals = [{
-        team: melo.mean(time, team, 'avg', neutral=True)
+        team: melo.mean(time, team, 'Average', neutral=True)
         for team in melo.labels
     } for melo in (nfl_spreads, nfl_totals)]
 
@@ -158,11 +163,11 @@ def points(model, year=2017, week=1):
     q.game(season_type='Regular', season_year=year, week=week)
 
     xlim, xticks, xlabel = {
-        'Fermi': [
+        'spread': [
             (-37, 37), np.linspace(-30, 30, 7),
             r'$\mathrm{home} - \mathrm{away}$ [points]'
         ],
-        'Bose': [
+        'total': [
             (5, 85), np.linspace(15, 75, 5),
             r'$\mathrm{home} + \mathrm{away}$ [points]'
         ]
@@ -177,7 +182,7 @@ def points(model, year=2017, week=1):
         away = game.away_team
 
         line_lo, box_lo, median, box_hi, line_hi = model.percentile(
-            time, home, away, q=[5, 25, 50, 75, 95], smooth=3
+            time, home, away, p=[5, 25, 50, 75, 95]
         )
 
         mean = model.mean(time, home, away)
@@ -264,8 +269,7 @@ def main():
     args_dict = vars(args)
 
     # plot offensive and defensive ratings
-    time = datetime.today()
-    ratings(time)
+    ratings(**args_dict)
 
     # plot the point spread and point total
     for plot in spreads, totals:
