@@ -112,7 +112,7 @@ def ratings(year=2017, week=1):
     time += timedelta(days=1)
 
     spreads, totals = [{
-        team: melo.mean(time, team, 'Average', neutral=True)
+        team: melo.mean(time, team, 'Average', bias=0)
         for team in melo.labels
     } for melo in (nfl_spreads, nfl_totals)]
 
